@@ -1,6 +1,6 @@
-from DataManager import DataManager
-from DiscordInformer import DiscordInformer
-from YouTubeConnector import YouTubeConnector
+from DataManager import *
+from DiscordInformer import *
+from YouTubeConnector import *
 
 DATA_TEMPLATE = {
     'config_youtube': {
@@ -46,9 +46,17 @@ SETABLE_DATA = [
     'config_application.greeting.phrase'
 ]
 
+EXPLAIN_OF_DATA = {
+    'config_youtube.api_key':       u'YouTube APIキー',
+    'config_youtube.channel_id':    u'YouTubeチャンネルID',
+    'config_discord.token':         u'Discordトークン',
+    'config_discord.channel_id':    u'DiscordチャンネルID'
+}
+
 class StreamingInformer:
     def __init__(self):
         self.__data_manager = DataManager('./data')
+        self.__youtube_connector = None
 
         for dn in ['config_youtube', 'config_discord', 'config_application', 'movie_data']:
             if self.__data_manager.exist(dn):
@@ -57,7 +65,17 @@ class StreamingInformer:
                 self.__data_manager.create_data(dn, DATA_TEMPLATE[dn])
 
     def get_data(self, data_name: str):
-        return self.__data_manager.get_data(data_name)
+        if data_name not in REGISTABLE_DATA + SETABLE_DATA:
+            self.show_message(u'指定されたデータが正しくありません。')
+            return None
+        else:
+            l = data_name.split('.')
+            if len(l) == 2:
+                return self.__data_manager.get_data(l[0])[l[1]]
+            elif len(l) == 3:
+                return self.__data_manager.get_data(l[0])[l[1]][l[2]]
+            else:
+                return None
 
     def show_message(self, message: str):
         pass
@@ -116,7 +134,7 @@ class StreamingInformer:
                     self.show_message(u'更新間隔は整数で指定される必要があります。')
                     return False
                 else:
-                    self.__data_manager.get_data(l[0])[l[1]] = int(value)
+                    self.__data_manager.get_data(l[0], ref=True)[l[1]] = int(value)
                     self.__data_manager.commit(l[0])
                     return True
             else:
@@ -152,9 +170,83 @@ class StreamingInformer:
                     if len(data['registed']) == 0:
                         data['selected'] = None
                     else:
-                        data['selected'] = data['registed'].keys()[0]
+                        data['selected'] = list(data['registed'].keys())[0]
                 self.__data_manager.commit(l[0])
                 return True
 
-    def start(self):
-        pass
+    def get_movie_data(self) -> dict:
+        try:
+            movie_items = self.__youtube_connector.get_movie_items(self.get_data('config_youtube.channel_id'))
+
+            movie_data = {}
+
+            for item in movie_items:
+                movie_data[item['etag']] = {
+                    'title': item['snippet']['title'],
+                    'url':  'https://www.youtube.com/v?={}'.format(item['id']['videoId']),
+                    'liveBroadcastContent': item['snippet']['liveBroadcastContent']
+                }
+
+            return movie_data
+        except UnexpectedResponseStatusError:
+            self.show_message(u'YouTubeサービスへの接続に失敗しました。')
+            return None
+        except NetworkUnreachedError:
+            self.show_message(u'ネットワークに接続できませんでした。')
+            return None
+        except ChannelNotFoundError:
+            self.show_message(u'指定されたYouTubeチャンネルが見つかりません。')
+            return None
+
+    def check_update(self) -> list:
+
+        updated_contents = []
+
+        movie_data = self.__data_manager.get_data('movie_data', ref=True)
+        current = self.get_movie_data(self.__data_manager.get_data('movie_data'))
+
+        if current is not None:
+            for etag, data in current.items():
+                if etag in movie_data:
+                    continue
+                else:
+                    movie_data.append(etag)
+                    updated_contents.append(u'''
+
+                    ''')
+
+        return updated_contents
+
+    def start(self, restart=False):
+        readied = True
+        l = []
+
+        for data_name in REGISTABLE_DATA:
+            if self.get_data(data_name)['selected'] is None:
+                readied = False
+                l.append(data_name)
+
+        if not readied:
+            self.show_message(u'未設定のデータ： {}'.format(
+                ', '.join([EXPLAIN_OF_DATA[data_name] for data_name in l])
+            ))
+            return
+
+        self.__youtube_connector = YouTubeConnector(self.get_data('config_youtube.api_key'))
+
+        if not restart:
+            movie_data = self.__data_manager.get_data('movie_data', ref=True)
+            for data in self.get_movie_data():
+                movie_data.append(data)
+
+        try:
+            DiscordInformer().activate(
+                self.get_data('config_discord.token'),
+                self.get_data('config_discord.channel_id'),
+                self.check_update,
+                self.get_data('config_application.update_interval'),
+                greeting_phrase=self.get_data('config_application.greeting.phrase') if self.get_data('config_application.greeting.active') else None
+            )
+        except DiscordChannelConnectionError:
+            self.show_message(u'Discordチャンネルに正しく接続できませんでした。\n設定が正しく行われているか確認して、もう一度実行してください。')
+            return

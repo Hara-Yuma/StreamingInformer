@@ -7,6 +7,12 @@ class UnexpectedResponseStatusError(Exception):
     '''
     pass
 
+class NetworkUnreachedError(Exception):
+    '''
+    ネットワークに接続されていないことを知らせる例外クラス
+    '''
+    pass
+
 class ChannelNotFoundError(Exception):
     '''
     指定されたチャンネルが存在しなかったことを知らせる例外クラス
@@ -19,7 +25,10 @@ class YouTubeConnector:
 
     @classmethod
     def channel_exist(cls, target_channel_id: str) -> bool:
-        status = requests.get('https://www.youtube.com/channel/{channel_id}'.format(channel_id=target_channel_id))
+        try:
+            status = requests.get('https://www.youtube.com/channel/{channel_id}'.format(channel_id=target_channel_id))
+        except:
+            raise NetworkUnreachedError(u'ネットワークに接続されていません。')
 
         if status == 200:
             return True
