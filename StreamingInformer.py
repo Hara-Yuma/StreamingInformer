@@ -1,3 +1,4 @@
+from pathlib import Path
 from DataManager import *
 from DiscordInformer import *
 from YouTubeConnector import *
@@ -55,6 +56,7 @@ EXPLAIN_OF_DATA = {
 
 class StreamingInformer:
     def __init__(self):
+        Path('./data').mkdir(exist_ok=True)
         self.__data_manager = DataManager('./data')
         self.__youtube_connector = None
 
